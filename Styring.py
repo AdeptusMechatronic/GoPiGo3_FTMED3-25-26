@@ -20,98 +20,115 @@ class Logikk:
         self.BLINDVEI_DET = 12
         
         # Konstante verdier
-        self.HAST_FRAM = 150 # Default hast framover [DPS]
-        self.STYRE_VERDI = 70 # Styrerespons ved navigasjon [0-100]   
-        pass
+        self.HAST_FRAM = 150  # Default hast framover [DPS]
+        self.STYRE_VERDI = 70  # Styrerespons ved navigasjon [0-100]
+        
+        # Navigasjon-tilstand
+        self.nav_start_time = None
+        self.nav_phase = "reversing"  # "reversing", "turning", "searching"
 
     def handling(self):
+        """Hovedlogikk basert på GRAFCET-tilstander"""
         
-        # Sjekk nåværende tilstand fra minne
         current_state = self.data.current_state
-        
-        #Leser avstand fra sensorer 
         dist_L = self.data.distance_L
         dist_R = self.data.distance_R
         
-        """ Stopptilstand """
-        
+        # ========== STOPPET ==========
         if current_state == "STOPPET":
-            # 0 hvis stoppet
             self.data.target_speed = 0
             self.data.target_steering = 0
         
-            # Sjekk om startknapp er trykket
-            if self.data.button_state == True:
-                print("Går til kjøring")
-                self.data.current_state = "Kjøring" #Endrer status i Minne
+            if self.data.button_state:
+                print("Går til Kjøring")
+                self.data.current_state = "Kjøring"
                 self.data.target_speed = 100
-
-                
-            
         
-        """ Tilstand kjøring """
-        
+        # ========== KJØRING ==========
         elif current_state == "Kjøring":
-           
-           # Sjekk blindvei/hindring front
-           if dist_L < self.BLINDVEI_DET and dist_R < self.BLINDVEI_DET:
-               print("Hindring, går til navigasjonsmodus")
-               self._transition_to("Navigasjon")
-               return
+            # Blindvei detektert?
+            if dist_L < self.BLINDVEI_DET and dist_R < self.BLINDVEI_DET:
+                print(f"Blindvei! L={dist_L:.1f}cm, R={dist_R:.1f}cm - Navigasjon startet")
+                self.data.current_state = "Navigasjon"
+                self.nav_start_time = time.time()
+                self.nav_phase = "reversing"
+                self.data.target_speed = -50
+                self.data.target_steering = 0
             
-            
-            # Sjekk for hinder som kan unngås
+            # Unngåbar hindring på én side?
             elif dist_L < self.HINDER_DET or dist_R < self.HINDER_DET:
-                # Beregner styring for å unngå hindring
                 steering = self._calculate_avoidance_steering(dist_L, dist_R)
                 self.data.target_steering = steering
                 self.data.target_speed = self.HAST_FRAM
-                return
-       
-       
-           """ Tilstand navigasjon """
-           
-           elif current_state == "Navigasjon":
-               print("Hindring funnet, leter etter trygg rute...")
-               self.data.target_speed = -50
-               self.data.target_steering = 100
-               
-               
-               
-               
-           
-           
-           """ 
-            """ Sjekker om det er hinder foran """
-            # Ingen hinder, kjør framover
-            if dist_L < 30 and dist_R < 30:
-                self.data.current_state = "Navigasjon" #Skriver til minnet
-                self.data.target_speed = 0
+            
+            # Normal kjøring
             else:
-                # Fortsett å kjøre, men juster styring
-                self.data.target_speed = 100
-                self.data.target_steering = self._calculate_steering_adjustement()
-    
-    def _calculate_steering_adjustement(self):
-    
-    
-                """ Håndtering av hinder """
-                elif current_state == "Navigasjon":
-                    if dist_L < HINDER_DET or dist_R < HINDER_DET:
-                     
+                self.data.target_speed = self.HAST_FRAM
+                self.data.target_steering = 0
         
-                        # Hindring høyre, klar bane venstre. Sving unna
-                        if dist_L > dist_R:
-                            steering = -70                
-                
-                        # Hindring venstre, klar bane høyre. Sving unna
-                        elif dist_R > dist_L:
-                            steering = 70
-                
-                        # Hindring begge sider, rygg og let etter åpning
-                        else:
-                            self.data.current_State = "Blindvei"
-                            
-                """ Handling ved blindvei """
-                elif current_state == "Blindvei":
-                """    
+        # ========== NAVIGASJON ==========
+        elif current_state == "Navigasjon":
+            self._handle_navigation(dist_L, dist_R)
+    
+    def _handle_navigation(self, dist_L, dist_R):
+        """
+        Håndterer navigasjon når blindvei er detektert
+        Faser: reversing → turning → searching → tilbake til Kjøring
+        """
+        current_time = time.time()
+        elapsed = current_time - self.nav_start_time
+        
+        if self.nav_phase == "reversing":
+            # Rygg i 2 sekunder
+            if elapsed < 2.0:
+                self.data.target_speed = -50
+                self.data.target_steering = 0
+                if elapsed < 0.5:
+                    print("Rygger...")
+            else:
+                # Gå til sving
+                self.nav_phase = "turning"
+                self.nav_start_time = current_time
+                print("Begynner å snu...")
+        
+        elif self.nav_phase == "turning":
+            # Snu 90 grader ca 1.5 sekunder
+            if elapsed < 1.5:
+                self.data.target_speed = 30
+                self.data.target_steering = 100
+            else:
+                # Gå til søking
+                self.nav_phase = "searching"
+                self.nav_start_time = current_time
+                print("Søker ny rute...")
+        
+        elif self.nav_phase == "searching":
+            # Søk etter åpning - kjør sakte framover
+            self.data.target_speed = 80  # Saktere enn normal kjøring
+            self.data.target_steering = 0
+            
+            # Hvis minst én sensor har fri vei
+            if dist_L > self.BLINDVEI_DET + 5 or dist_R > self.BLINDVEI_DET + 5:
+                print(f"Åpning funnet! L={dist_L:.1f}cm, R={dist_R:.1f}cm - Tilbake til Kjøring")
+                self.data.current_state = "Kjøring"
+                self.nav_phase = "reversing"
+            
+            # Sikkerhet: hvis den har søkt i for lang tid, gi opp
+            if elapsed > 10:
+                print("Søk timeout - tilbake til Kjøring")
+                self.data.current_state = "Kjøring"
+                self.nav_phase = "reversing"
+    
+    def _calculate_avoidance_steering(self, dist_L, dist_R):
+        """
+        Beregner styring for å unngå hindring på én side
+        Styr mot siden med mest plass
+        """
+        if dist_L < dist_R:
+            return self.STYRE_VERDI  # Styr høyre
+        else:
+            return -self.STYRE_VERDI  # Styr venstre
+    
+    def _transition_to(self, new_state):
+        """Bytter til ny tilstand"""
+        self.data.current_state = new_state

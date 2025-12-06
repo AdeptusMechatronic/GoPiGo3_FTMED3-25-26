@@ -51,8 +51,8 @@ def main():
         
     finally:
         # Opprydding
-        Utganger.cleanup() # sikrer at motorer stopper
-        InputHandler.cleanup() # renser GPIO
+        output_handler.cleanup() # sikrer at motorer stopper
+        input_handler.cleanup() # renser GPIO
         print("Program avsluttet")
         
 if __name__ == "__main__":

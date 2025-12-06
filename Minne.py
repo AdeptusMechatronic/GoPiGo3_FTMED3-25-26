@@ -28,4 +28,7 @@ class SensorData:
         """ Tilstander (start/stopp, sitter fast etc) """
         
         self.current_state = "STOPPET" # Tilstand satt ved oppstart
-       
+        self.last_state = None  # For å logge tilstandsendringer
+        
+        """ Debug """
+        self.state_changed_time = None
